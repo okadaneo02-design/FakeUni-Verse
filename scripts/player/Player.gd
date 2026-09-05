@@ -35,6 +35,7 @@ var peer_id := 1
 
 var _cfg: Dictionary = TALL
 var _is_authority := true
+var _class_scale := 1.0
 
 var _body_height := 2.62
 var _eye_height := 2.50
@@ -44,6 +45,11 @@ var _crouch_blend := 0.0
 var _yaw_rot := 0.0
 var _pitch := 0.0
 var _pitch_limit := 1.45
+
+var _fov_target := 76.0
+const FOV_BASE := 76.0
+const FOV_MIN := 50.0
+const FOV_MAX := 95.0
 
 var _cam: Camera3D
 var _rig: Node3D
@@ -75,6 +81,7 @@ func setup(p_id: int, p_class: int) -> void:
 	peer_id = p_id
 	player_class = p_class
 	_cfg = TALL if p_class == Globals.ClassType.TALL else SHORT
+	_class_scale = 1.0 if p_class == Globals.ClassType.TALL else 0.6
 	_body_height = _cfg["body"]
 	_eye_height = _cfg["eye"]
 	set_multiplayer_authority(p_id)
@@ -137,8 +144,9 @@ func _make_hand(side: float, vert: float) -> Node3D:
 	var mesh := MeshInstance3D.new()
 	mesh.mesh = _glove_mesh()
 	mesh.material_override = _glove_mat()
+	mesh.scale = Vector3.ONE * _class_scale
 	root.add_child(mesh)
-	root.position = Vector3(side, vert - 0.10, -0.42)
+	root.position = Vector3(side, vert - 0.10, -0.42) * _class_scale
 	root.rotation_degrees = Vector3(8, 0, -8.0 if side < 0 else 8.0)
 	return root
 
@@ -159,6 +167,7 @@ func _glove_mat() -> Material:
 func _build_lower_body() -> void:
 	_lower_body = Node3D.new()
 	_lower_body.name = "LowerBody"
+	_lower_body.scale = Vector3.ONE * _class_scale
 	var torso := MeshInstance3D.new()
 	torso.mesh = _unit_box()
 	torso.material_override = _class_body_mat()
@@ -180,6 +189,7 @@ func _build_lower_body() -> void:
 func _make_remote_body() -> Node3D:
 	var root := Node3D.new()
 	root.name = "RemoteBody"
+	root.scale = Vector3.ONE * _class_scale
 	var torso := MeshInstance3D.new()
 	torso.mesh = _unit_box()
 	torso.material_override = _class_body_mat()
@@ -235,6 +245,11 @@ func _unhandled_input(event: InputEvent) -> void:
 	if event is InputEventMouseMotion and Input.get_mouse_mode() == Input.MOUSE_MODE_CAPTURED:
 		_yaw_rot -= event.relative.x * SENSITIVITY
 		_pitch = clampf(_pitch - event.relative.y * SENSITIVITY, -_pitch_limit, _pitch_limit)
+	elif event is InputEventMouseButton and Input.get_mouse_mode() == Input.MOUSE_MODE_CAPTURED:
+		if event.button_index == MOUSE_BUTTON_WHEEL_UP and event.pressed:
+			_fov_target = clampf(_fov_target - 5.0, FOV_MIN, FOV_MAX)
+		elif event.button_index == MOUSE_BUTTON_WHEEL_DOWN and event.pressed:
+			_fov_target = clampf(_fov_target + 5.0, FOV_MIN, FOV_MAX)
 
 
 func _physics_process(delta: float) -> void:
@@ -327,6 +342,8 @@ func _update_camera(delta: float) -> void:
 	_rig.position = Vector3(bob_x + sh_x, _eye_height + bob_y + sh_y, 0.0)
 	_rig.rotation = Vector3(_pitch, 0.0, _lean + sh_x * 0.4)
 
+	_cam.fov = lerpf(_cam.fov, _fov_target, 1.0 - exp(-12.0 * delta))
+
 	if _cam_ray.is_colliding():
 		var dist := _cam_ray.get_collision_point().distance_to(_cam_ray.global_position)
 		if dist < 0.5:
@@ -348,10 +365,11 @@ func _bob_hands(_delta: float, bob_x: float, bob_y: float) -> void:
 	if _left_hand == null or _right_hand == null:
 		return
 	var hand_bob: float = -abs(sin(_bob_t)) * 0.03
-	_left_hand.position.y = -0.28 + bob_y * 0.5 + hand_bob
-	_right_hand.position.y = -0.28 + bob_y * 0.5 + hand_bob
-	_left_hand.position.x = -0.20 + bob_x
-	_right_hand.position.x = 0.20 + bob_x
+	var s := _class_scale
+	_left_hand.position.y = (-0.28 + bob_y * 0.5 + hand_bob) * s
+	_right_hand.position.y = (-0.28 + bob_y * 0.5 + hand_bob) * s
+	_left_hand.position.x = (-0.20 + bob_x) * s
+	_right_hand.position.x = (0.20 + bob_x) * s
 
 
 func _update_shape_size() -> void:

@@ -130,6 +130,7 @@ const LIGHTS := [
 ]
 
 var _mats := {}
+var _tex := {}
 var _unit_box: BoxMesh
 var _unit_sphere: SphereMesh
 var _unit_cyl: CylinderMesh
@@ -166,6 +167,53 @@ func _make_shared() -> void:
 	_unit_cyl.height = 1.0
 	_unit_quad = QuadMesh.new()
 	_unit_quad.size = Vector2.ONE
+	_make_textures()
+
+
+func _make_textures() -> void:
+	# procedural, deterministic textures: wood grain, plaster, concrete, grass
+	var noise := FastNoiseLite.new()
+	noise.noise_type = FastNoiseLite.TYPE_SIMPLEX
+	noise.frequency = 0.04
+	noise.seed = 7
+	_tex["wood"] = _gen_wood_tex(noise, 256, 256)
+	_tex["plaster"] = _gen_noise_tex(noise, 256, 256, Color(0.98, 0.96, 0.90), 0.02)
+	_tex["concrete"] = _gen_noise_tex(noise, 256, 256, Color(0.85, 0.85, 0.83), 0.04)
+	_tex["grass"] = _gen_noise_tex(noise, 256, 256, Color(0.42, 0.62, 0.36), 0.08)
+	_tex["tile"] = _gen_noise_tex(noise, 128, 128, Color(0.85, 0.83, 0.78), 0.02)
+	_tex["siding"] = _gen_noise_tex(noise, 256, 256, Color(0.86, 0.79, 0.66), 0.03)
+
+
+func _gen_noise_tex(noise: FastNoiseLite, w: int, h: int, base: Color, amp: float) -> ImageTexture:
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 42
+	var img := Image.create(w, h, false, Image.FORMAT_RGB8)
+	for y in range(h):
+		for x in range(w):
+			var n := noise.get_noise_2d(float(x), float(y))
+			var g := (rng.randf() - 0.5) * 0.02
+			var c := base + Color(n, n, n) * amp + Color(g, g, g)
+			img.set_pixel(x, y, c.clamp())
+	return ImageTexture.create_from_image(img)
+
+
+func _gen_wood_tex(noise: FastNoiseLite, w: int, h: int) -> ImageTexture:
+	var plank_h := 42.0
+	var img := Image.create(w, h, false, Image.FORMAT_RGB8)
+	var base_col := Color(0.72, 0.52, 0.30)
+	for y in range(h):
+		var plank_parity: float = float(int(y / plank_h) % 2)
+		var plank_shade: float = 1.0 - 0.3 * plank_parity
+		for x in range(w):
+			var g := noise.get_noise_2d(float(x) * 0.35, float(y) * 2.0)
+			var seam := 0.0
+			var d: float = fmod(float(y), plank_h) / plank_h
+			if d < 0.05 or d > 0.95:
+				seam = 0.25
+			var v := clampf(plank_shade - g * 0.22 - seam, 0.15, 1.0)
+			var c := base_col * v
+			img.set_pixel(x, y, c)
+	return ImageTexture.create_from_image(img)
 
 
 func _register_rooms() -> void:
@@ -230,20 +278,20 @@ func _make_mat(key: String) -> StandardMaterial3D:
 	m.roughness = 0.9
 	m.albedo_color = Color("c9bdaa")
 	match key:
-		"plaster": m.albedo_color = Color("f2ead8"); m.roughness = 0.95
-		"plaster_dim": m.albedo_color = Color("cfc6b2")
-		"siding": m.albedo_color = Color("b9a88a"); m.roughness = 1.0
+		"plaster": m.albedo_color = Color.WHITE; m.albedo_texture = _tex.get("plaster"); m.roughness = 0.95
+		"plaster_dim": m.albedo_color = Color(0.85, 0.82, 0.74); m.albedo_texture = _tex.get("plaster")
+		"siding": m.albedo_color = Color.WHITE; m.albedo_texture = _tex.get("siding"); m.roughness = 1.0
 		"brick": m.albedo_color = Color("9c4a3a")
-		"wood_light": m.albedo_color = Color("c89a62"); m.roughness = 0.7
-		"wood_dark": m.albedo_color = Color("7a5230"); m.roughness = 0.75
-		"wood_plank": m.albedo_color = Color("a87d4f"); m.roughness = 0.8
-		"tile": m.albedo_color = Color("d8d4cc"); m.roughness = 0.35
-		"tile_dark": m.albedo_color = Color("6a6a70"); m.roughness = 0.4
+		"wood_light": m.albedo_color = Color(1.25, 1.15, 0.95); m.albedo_texture = _tex.get("wood"); m.roughness = 0.7
+		"wood_dark": m.albedo_color = Color(0.6, 0.52, 0.45); m.albedo_texture = _tex.get("wood"); m.roughness = 0.75
+		"wood_plank": m.albedo_color = Color(1.05, 0.95, 0.8); m.albedo_texture = _tex.get("wood"); m.roughness = 0.8
+		"tile": m.albedo_color = Color.WHITE; m.albedo_texture = _tex.get("tile"); m.roughness = 0.35
+		"tile_dark": m.albedo_color = Color(0.55, 0.55, 0.6); m.roughness = 0.4
 		"carpet": m.albedo_color = Color("9a8f7a"); m.roughness = 1.0
 		"carpet_blue": m.albedo_color = Color("5a7290"); m.roughness = 1.0
 		"carpet_red": m.albedo_color = Color("8a3f38"); m.roughness = 1.0
-		"concrete": m.albedo_color = Color("8d8d8a"); m.roughness = 0.95
-		"concrete_dark": m.albedo_color = Color("5d5d5a")
+		"concrete": m.albedo_color = Color.WHITE; m.albedo_texture = _tex.get("concrete"); m.roughness = 0.95
+		"concrete_dark": m.albedo_color = Color(0.5, 0.5, 0.48); m.albedo_texture = _tex.get("concrete")
 		"glass": m.albedo_color = Color(0.75, 0.88, 1.0, 0.35); m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA; m.roughness = 0.05
 		"metal": m.albedo_color = Color("b8b8c0"); m.roughness = 0.35; m.metallic = 0.6
 		"metal_dark": m.albedo_color = Color("5f5f66"); m.roughness = 0.4; m.metallic = 0.7
@@ -251,7 +299,7 @@ func _make_mat(key: String) -> StandardMaterial3D:
 		"white": m.albedo_color = Color("f4f2ec"); m.roughness = 0.7
 		"door_wood": m.albedo_color = Color("8a5f35"); m.roughness = 0.55
 		"roof": m.albedo_color = Color("5a4a3e"); m.roughness = 1.0
-		"grass": m.albedo_color = Color("5f8f4a"); m.roughness = 1.0
+		"grass": m.albedo_color = Color.WHITE; m.albedo_texture = _tex.get("grass"); m.roughness = 1.0
 		"path": m.albedo_color = Color("a8a297"); m.roughness = 0.9
 		"stone": m.albedo_color = Color("9a9488"); m.roughness = 0.85
 		"plant": m.albedo_color = Color("3f7a3a"); m.roughness = 1.0
@@ -267,6 +315,7 @@ func _make_mat(key: String) -> StandardMaterial3D:
 		"pipes": m.albedo_color = Color("9aa0a8"); m.roughness = 0.4
 		"car_red": m.albedo_color = Color("a83a30"); m.roughness = 0.4; m.metallic = 0.5
 		"car_dark": m.albedo_color = Color("2e2e34"); m.roughness = 0.4
+		"baseboard": m.albedo_color = Color("e8e4da"); m.roughness = 0.6
 	return m
 
 
@@ -627,6 +676,12 @@ func _build_wall(sb: StaticBody3D, a: Vector2, b: Vector2, fy: float, h: float, 
 			pos = Vector3(a.x, fy + h / 2.0, mid)
 		var size := Vector3(slen, h, WALL_T) if horizontal else Vector3(WALL_T, h, slen)
 		box(sb, size, pos, mat_key, 0.0, sb)
+		# baseboard along interior walls (skipped in door/window openings)
+		if not exterior:
+			if horizontal:
+				box(sb, Vector3(slen, 0.09, WALL_T + 0.02), Vector3(mid, fy + 0.045, a.y), "baseboard", 0.0, sb)
+			else:
+				box(sb, Vector3(WALL_T + 0.02, 0.09, slen), Vector3(a.x, fy + 0.045, mid), "baseboard", 0.0, sb)
 
 	# door leaves + window frames/glass
 	for o in openings:
@@ -890,10 +945,12 @@ func _fence(parent: Node, a: Vector3, b: Vector3) -> void:
 
 func _build_lights() -> void:
 	var sun := DirectionalLight3D.new()
-	sun.rotation_degrees = Vector3(-55.0, -40.0, 0.0)
-	sun.light_energy = 1.1
+	sun.rotation_degrees = Vector3(-52.0, -38.0, 0.0)
+	sun.light_energy = 1.35
+	sun.light_color = Color(1.0, 0.96, 0.88)
 	sun.shadow_enabled = true
-	sun.shadow_blur = 2.0
+	sun.shadow_blur = 3.0
+	sun.directional_shadow_max_distance = 60.0
 	_house.add_child(sun)
 
 	for l in LIGHTS:
