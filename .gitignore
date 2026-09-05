@@ -1,0 +1,8 @@
+engine/
+build/
+*.import
+.godot/
+export_web/
+
+# Summer Engine local-only state (SummerGit, caches, locks)
+.summer/local/
