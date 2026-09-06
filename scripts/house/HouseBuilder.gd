@@ -138,10 +138,12 @@ var _unit_quad: QuadMesh
 
 var _rooms := {}   # name -> rect+config
 var _house: Node3D
+var _world: Node = null
 
 
-func build(parent: Node3D) -> void:
+func build(parent: Node3D, world: Node = null) -> void:
 	_house = parent
+	_world = world
 	_make_shared()
 	_register_rooms()
 	_build_structure()
@@ -150,7 +152,7 @@ func build(parent: Node3D) -> void:
 	_build_exterior()
 	_build_yard()
 	_build_lights()
-	FurnitureFactory.populate(self, _house)
+	FurnitureFactory.populate(self, _house, world)
 
 
 # ------------------------------------------------------------------ helpers
@@ -525,7 +527,7 @@ func _build_rooms() -> void:
 			var a: Vector2 = w[1]
 			var b: Vector2 = w[2]
 			var openings := _openings_for(name, side, rect, door_map)
-			_build_wall(sb, a, b, fy, h, side_is_exterior(name, side, rect), openings)
+			_build_wall(sb, a, b, fy, h, side_is_exterior(name, side, rect), openings, name)
 
 
 func _key(a: String, b: String) -> String:
@@ -635,7 +637,7 @@ func _windows_for(name: String, side: String, rect: Rect2) -> Array:
 	return out
 
 
-func _build_wall(sb: StaticBody3D, a: Vector2, b: Vector2, fy: float, h: float, exterior: bool, openings: Array) -> void:
+func _build_wall(sb: StaticBody3D, a: Vector2, b: Vector2, fy: float, h: float, exterior: bool, openings: Array, room: String) -> void:
 	var mat_key := "siding" if exterior else "plaster"
 	var horizontal := absf(a.y - b.y) < 0.001
 	var len := a.distance_to(b)
@@ -686,20 +688,59 @@ func _build_wall(sb: StaticBody3D, a: Vector2, b: Vector2, fy: float, h: float, 
 	# door leaves + window frames/glass
 	for o in openings:
 		if o["type"] == "window":
-			_build_window(sb, a, b, fy, h, exterior, o["a"], o["b"])
+			_build_window(sb, a, b, fy, h, exterior, o["a"], o["b"], room)
 		else:
 			_build_door(sb, a, b, fy, h, exterior, o["a"], o["b"])
+
+
+func _make_openable_window(a: Vector2, b: Vector2, fy: float, o_lo: float, o_hi: float, wlen: float) -> void:
+	# kitchen window over the sink: hinged sash that tilts outward on interact
+	var sw := Swinger.new()
+	sw.name = "window_kitchen"
+	sw.position = Vector3(mid_pos_for(o_lo, o_hi), fy + HEAD_H, a.y - 0.04)
+	var pivot := Node3D.new()
+	sw.add_child(pivot)
+	var sash := StaticBody3D.new()
+	sash.collision_layer = 1
+	sash.collision_mask = 0
+	var sm := MeshInstance3D.new()
+	sm.mesh = _unit_box
+	sm.material_override = mat("frame")
+	var sash_h := HEAD_H - SILL_H - 0.05
+	sm.scale = Vector3(wlen - 0.1, sash_h, 0.03)
+	sm.position = Vector3(0, -sash_h / 2.0, 0)
+	sash.add_child(sm)
+	var cs := CollisionShape3D.new()
+	var shape := BoxShape3D.new()
+	shape.size = Vector3(wlen - 0.1, sash_h, 0.03)
+	cs.shape = shape
+	cs.position = sm.position
+	sash.add_child(cs)
+	var area := CollisionShape3D.new()
+	var ashape := BoxShape3D.new()
+	ashape.size = Vector3(wlen, sash_h, 0.2)
+	area.shape = ashape
+	area.position = sm.position
+	sw.add_child(area)
+	sw.setup(pivot, sash, -18.0, "WINDOW", true)
+	sw.world = _world
+	_house.add_child(sw)
+
+
+func mid_pos_for(o_lo: float, o_hi: float) -> float:
+	return (o_lo + o_hi) / 2.0
 
 
 func _wall_dir(a: Vector2, b: Vector2) -> Vector2:
 	return (b - a).normalized()
 
 
-func _build_window(sb: StaticBody3D, a: Vector2, b: Vector2, fy: float, h: float, exterior: bool, o_lo: float, o_hi: float) -> void:
+func _build_window(sb: StaticBody3D, a: Vector2, b: Vector2, fy: float, h: float, exterior: bool, o_lo: float, o_hi: float, room: String) -> void:
 	var horizontal := absf(a.y - b.y) < 0.001
 	var dir := _wall_dir(a, b)
 	var mid := (o_lo + o_hi) / 2.0
 	var wlen := o_hi - o_lo
+	var openable := room == "kitchen" and horizontal and absf(o_lo - 9.0) < 0.05
 	var frame_mat := "frame"
 	var glass_mat := "glass"
 	# lower wall (sill to floor)
@@ -747,10 +788,51 @@ func _build_door(sb: StaticBody3D, a: Vector2, b: Vector2, fy: float, h: float, 
 	# door leaf swung open AGAINST the wall beside the opening (gap stays clear)
 	var leaf := 0.05
 	var leaf_h := DOOR_H - 0.04
-	if horizontal:
-		box(sb, Vector3(dw, leaf_h, leaf), Vector3(o_lo - dw / 2.0 + 0.02, fy + leaf_h / 2.0, a.y + WALL_T / 2.0 + 0.03), "door_wood", 0.0, sb)
-	else:
-		box(sb, Vector3(leaf, leaf_h, dw), Vector3(a.x + WALL_T / 2.0 + 0.03, fy + leaf_h / 2.0, o_lo - dw / 2.0 + 0.02), "door_wood", 0.0, sb)
+	if not _is_front_door(horizontal, a, b, fy, o_lo, o_hi):
+		if horizontal:
+			box(sb, Vector3(dw, leaf_h, leaf), Vector3(o_lo - dw / 2.0 + 0.02, fy + leaf_h / 2.0, a.y + WALL_T / 2.0 + 0.03), "door_wood", 0.0, sb)
+		else:
+			box(sb, Vector3(leaf, leaf_h, dw), Vector3(a.x + WALL_T / 2.0 + 0.03, fy + leaf_h / 2.0, o_lo - dw / 2.0 + 0.02), "door_wood", 0.0, sb)
+	if not _is_front_door(horizontal, a, b, fy, o_lo, o_hi):
+		return
+	if not _is_front_door(horizontal, a, b, fy, o_lo, o_hi):
+		return
+	# The front door is a real swinger: it starts closed and blocks the opening.
+	# Remove the static leaf, add an interactive door panel on a hinge.
+	var front := Swinger.new()
+	front.name = "door_front"
+	front.position = Vector3(o_lo, fy, a.y if horizontal else a.x)
+	var pivot := Node3D.new()
+	front.add_child(pivot)
+	var panel := StaticBody3D.new()
+	panel.collision_layer = 1
+	panel.collision_mask = 0
+	var pm := MeshInstance3D.new()
+	pm.mesh = _unit_box
+	pm.material_override = mat("door_wood")
+	pm.scale = Vector3(dw, leaf_h, 0.05)
+	pm.position = Vector3(dw / 2.0, leaf_h / 2.0, 0.0)
+	panel.add_child(pm)
+	var cs := CollisionShape3D.new()
+	var shape := BoxShape3D.new()
+	shape.size = Vector3(dw, leaf_h, 0.05)
+	cs.shape = shape
+	cs.position = Vector3(dw / 2.0, leaf_h / 2.0, 0.0)
+	panel.add_child(cs)
+	var area := CollisionShape3D.new()
+	var ashape := BoxShape3D.new()
+	ashape.size = Vector3(dw + 0.2, leaf_h + 0.2, 0.15)
+	area.shape = ashape
+	area.position = Vector3(dw / 2.0, leaf_h / 2.0, 0.0)
+	front.add_child(area)
+	front.setup(pivot, panel, 100.0, "DOOR")
+	front.world = _world
+	_house.add_child(front)
+
+
+func _is_front_door(horizontal: bool, a: Vector2, b: Vector2, fy: float, o_lo: float, o_hi: float) -> bool:
+	# foyer's south exterior door
+	return fy < 0.1 and horizontal and absf(a.y - 16.0) < 0.01 and absf(o_lo - 10.2) < 0.05
 
 
 # ------------------------------------------------------------------ stairs
@@ -943,6 +1025,62 @@ func _fence(parent: Node, a: Vector3, b: Vector3) -> void:
 		box(parent, Vector3(0.05, 0.6, len), mid + Vector3(0, 1.05, 0), "frame", 0.0, parent)
 
 
+func _make_room_switch(room: String, light: OmniLight3D) -> void:
+	# find the first interior door of the room and put the switch beside it
+	var door_map := {}
+	for pair in DOORS:
+		door_map[_key(pair[0], pair[1])] = true
+	var rect: Rect2 = _rooms[room]["rect"]
+	var fy := _floor_y(_rooms[room]["floor"])
+	for side in ["n", "s", "w", "e"]:
+		for o in _openings_for(room, side, rect, door_map):
+			if o["type"] != "door":
+				continue
+			var mid: float = (o["a"] + o["b"]) / 2.0
+			var pos := Vector3.ZERO
+			var rot := 0.0
+			match side:
+				"n":
+					pos = Vector3(mid + 0.8, fy + 1.25, rect.position.y + WALL_T / 2.0 + 0.03)
+					rot = 0.0
+				"s":
+					pos = Vector3(mid + 0.8, fy + 1.25, rect.end.y - WALL_T / 2.0 - 0.03)
+					rot = 0.0
+				"w":
+					pos = Vector3(rect.position.x + WALL_T / 2.0 + 0.03, fy + 1.25, mid + 0.8)
+					rot = 90.0
+				"e":
+					pos = Vector3(rect.end.x - WALL_T / 2.0 - 0.03, fy + 1.25, mid + 0.8)
+					rot = 90.0
+			var sw := Switch.new()
+			sw.name = "switch_" + room
+			sw.position = pos
+			sw.rotation_degrees = Vector3(0, rot, 0)
+			var shape := CollisionShape3D.new()
+			var bshape := BoxShape3D.new()
+			bshape.size = Vector3(0.22, 0.16, 0.12)
+			shape.shape = bshape
+			sw.add_child(shape)
+			var plate := MeshInstance3D.new()
+			plate.mesh = _unit_box
+			plate.material_override = mat("white")
+			plate.scale = Vector3(0.18, 0.12, 0.02)
+			plate.position = Vector3(0, 0, 0.03)
+			sw.add_child(plate)
+			var knob := Node3D.new()
+			var knob_mesh := MeshInstance3D.new()
+			knob_mesh.mesh = _unit_box
+			knob_mesh.material_override = mat("metal_dark")
+			knob_mesh.scale = Vector3(0.05, 0.06, 0.015)
+			knob_mesh.position = Vector3(0, 0, 0.06)
+			knob.add_child(knob_mesh)
+			sw.add_child(knob)
+			sw.setup(light, knob, "LIGHT SWITCH")
+			sw.world = _world
+			_house.add_child(sw)
+			return
+
+
 func _build_lights() -> void:
 	var sun := DirectionalLight3D.new()
 	sun.rotation_degrees = Vector3(-52.0, -38.0, 0.0)
@@ -955,12 +1093,14 @@ func _build_lights() -> void:
 
 	for l in LIGHTS:
 		var omni := OmniLight3D.new()
+		omni.name = "light_" + l[0]
 		omni.position = Vector3(l[1], _floor_y(_rooms[l[0]]["floor"]) + l[5], l[2])
 		omni.light_energy = l[3]
 		omni.omni_range = 7.0
 		omni.light_color = Color(l[4])
 		omni.shadow_enabled = false
 		_house.add_child(omni)
+		_make_room_switch(l[0], omni)
 
 	# ceiling lamp fixtures (visual)
 	for l in LIGHTS:

@@ -24,6 +24,7 @@ var _help_label: Label
 
 var _paused := false
 var _pause_menu: Control
+var _prompt_label: Label
 
 
 func _ready() -> void:
@@ -31,7 +32,7 @@ func _ready() -> void:
 	_house.name = "House"
 	add_child(_house)
 	var builder := HouseBuilder.new()
-	builder.build(_house)
+	builder.build(_house, self)
 
 	var env := WorldEnvironment.new()
 	env.environment = _make_env()
@@ -88,10 +89,17 @@ func _sync_players() -> void:
 		if id == _local_id:
 			_local_player = p
 			p._cam.current = true
+			p.world_node = self
+			p.interaction_changed.connect(_on_interaction_changed)
 			_class_label.text = "CLASS: %s" % Globals.CLASS_NAMES[int(info["class"])]
 			_class_label.add_theme_color_override("font_color", Globals.CLASS_COLORS[int(info["class"])])
 	if _local_player == null and _players.has(_local_id):
 		_local_player = _players[_local_id]
+
+
+func _on_interaction_changed(prompt: String) -> void:
+	_prompt_label.text = "" if prompt.is_empty() else "E - %s" % prompt
+	_prompt_label.visible = not prompt.is_empty()
 
 
 func _build_hud() -> void:
@@ -165,6 +173,17 @@ func _build_hud() -> void:
 	cross.add_theme_color_override("font_color", Color(1, 1, 1, 0.8))
 	_hud_root.add_child(cross)
 
+	# interaction prompt (center-bottom)
+	_prompt_label = Label.new()
+	_prompt_label.set_anchors_preset(Control.PRESET_CENTER_BOTTOM)
+	_prompt_label.position = Vector2(-120, -110)
+	_prompt_label.custom_minimum_size = Vector2(240, 0)
+	_prompt_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_prompt_label.add_theme_font_size_override("font_size", 15)
+	_prompt_label.add_theme_color_override("font_color", Color("ffe9a8"))
+	_prompt_label.visible = false
+	_hud_root.add_child(_prompt_label)
+
 	_build_pause_menu()
 
 
@@ -204,6 +223,41 @@ func _build_pause_menu() -> void:
 	leave.text = "LEAVE TO MENU"
 	leave.pressed.connect(_on_leave)
 	vbox.add_child(leave)
+
+
+# ------------------------------------------------------------ interactions
+
+func request_interact(path: NodePath, dir := Vector3.ZERO) -> void:
+	if multiplayer.multiplayer_peer == null or multiplayer.is_server():
+		_apply_interact(path, dir)
+	else:
+		rpc_id(1, "_apply_interact", path, dir)
+
+
+@rpc("any_peer")
+func _apply_interact(path: NodePath, dir := Vector3.ZERO) -> void:
+	var obj := get_node_or_null(path)
+	if obj == null or not (obj is Interactable):
+		return
+	obj.do_host_interact(dir)
+	if obj is ShoveProp:
+		_sync_prop_transform.rpc(obj.get_path(), obj.global_position, obj.global_rotation)
+	else:
+		_set_state.rpc(obj.get_path(), obj.state)
+
+
+@rpc("any_peer", "call_local")
+func _set_state(path: NodePath, s: int) -> void:
+	var obj := get_node_or_null(path)
+	if obj and obj is Interactable:
+		obj.set_state_networked(s)
+
+
+@rpc("any_peer", "call_local")
+func _sync_prop_transform(path: NodePath, origin: Vector3, rot: Vector3) -> void:
+	var obj := get_node_or_null(path)
+	if obj and obj is ShoveProp:
+		obj.set_target(origin, rot)
 
 
 func _unhandled_input(event: InputEvent) -> void:

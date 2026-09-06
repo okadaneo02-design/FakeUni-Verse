@@ -13,15 +13,21 @@ extends CharacterBody3D
 
 signal interaction_changed(prompt: String)
 
+var world_node: Node = null
+var _interact_ray: RayCast3D
+var _current_interact: Interactable = null
+
 const TALL := {
 	"eye": 2.50, "body": 2.62, "radius": 0.40,
 	"crouch_eye": 1.30, "crouch_body": 1.50,
 	"walk": 3.4, "sprint": 5.6, "jump": 4.6,
+	"step": 0.55, "reach": 3.0,
 }
 const SHORT := {
 	"eye": 1.10, "body": 1.22, "radius": 0.32,
 	"crouch_eye": 0.55, "crouch_body": 0.72,
 	"walk": 3.0, "sprint": 5.1, "jump": 5.4,
+	"step": 0.5, "reach": 2.2,
 }
 
 const SENSITIVITY := 0.0022
@@ -59,6 +65,7 @@ var _lower_body: Node3D
 var _remote_body: Node3D
 var _collision: CollisionShape3D
 var _cam_ray: RayCast3D
+var _last_prompt := ""
 
 var _bob_t := 0.0
 var _land_t := 0.0
@@ -127,6 +134,14 @@ func _build_view() -> void:
 	_cam_ray.collision_mask = 1 | 4
 	_cam_ray.add_exception(self)
 	_rig.add_child(_cam_ray)
+
+	_interact_ray = RayCast3D.new()
+	_interact_ray.target_position = Vector3(0, 0, -_cfg["reach"])
+	_interact_ray.collision_mask = 4
+	_interact_ray.collide_with_areas = true
+	_interact_ray.collide_with_bodies = false
+	_interact_ray.add_exception(self)
+	_rig.add_child(_interact_ray)
 
 	_build_arms()
 	_build_lower_body()
@@ -250,6 +265,9 @@ func _unhandled_input(event: InputEvent) -> void:
 			_fov_target = clampf(_fov_target - 5.0, FOV_MIN, FOV_MAX)
 		elif event.button_index == MOUSE_BUTTON_WHEEL_DOWN and event.pressed:
 			_fov_target = clampf(_fov_target + 5.0, FOV_MIN, FOV_MAX)
+	elif event.is_action_pressed("interact"):
+		if _current_interact and _current_interact.can_interact(player_class):
+			_current_interact.request_interact(-transform.basis.z)
 
 
 func _physics_process(delta: float) -> void:
@@ -305,8 +323,54 @@ func _physics_authority(delta: float) -> void:
 		_land_amp = impact
 		_land_t = 0.0
 
+	if is_on_floor() and is_on_wall():
+		_try_step_up()
+
 	_apply_lean_from_collisions()
 	_update_camera(delta)
+	_update_interaction()
+
+
+func _try_step_up() -> void:
+	var forward := -transform.basis.z
+	var radius: float = _cfg["radius"]
+	var step_max: float = _cfg["step"]
+	var space := get_world_3d().direct_space_state
+	var from := global_position + Vector3(0, step_max + 0.15, 0) + forward * (radius + 0.05)
+	var q := PhysicsRayQueryParameters3D.new()
+	q.from = from
+	q.to = from + Vector3(0, -(step_max + 0.5), 0)
+	q.collision_mask = 1
+	q.exclude = [get_rid()]
+	var hit := space.intersect_ray(q)
+	if hit.is_empty():
+		return
+	var surface_y: float = hit["position"].y
+	if surface_y < global_position.y - 0.05 or surface_y > global_position.y + step_max + 0.05:
+		return
+	var q2 := PhysicsRayQueryParameters3D.new()
+	q2.from = Vector3(from.x, surface_y + 0.1, from.z)
+	q2.to = q2.from + Vector3(0, _body_height + 0.4, 0)
+	q2.collision_mask = 1
+	q2.exclude = [get_rid()]
+	if not space.intersect_ray(q2).is_empty():
+		return
+	global_position.y = surface_y + 0.02
+
+
+func _update_interaction() -> void:
+	var target: Interactable = null
+	if _interact_ray.is_colliding():
+		var c := _interact_ray.get_collider()
+		if c is Interactable:
+			target = c
+	_current_interact = target
+	var p := ""
+	if target:
+		p = target.get_prompt_for(player_class)
+	if p != _last_prompt:
+		_last_prompt = p
+		interaction_changed.emit(p)
 
 
 func _apply_lean_from_collisions() -> void:
