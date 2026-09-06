@@ -33,10 +33,6 @@ func _build_ui() -> void:
 	add_child(bg)
 
 	var panel := PanelContainer.new()
-	panel.set_anchors_preset(Control.PRESET_CENTER)
-	panel.grow_horizontal = Control.GROW_DIRECTION_BOTH
-	panel.grow_vertical = Control.GROW_DIRECTION_BOTH
-	panel.custom_minimum_size = Vector2(520, 0)
 	add_child(panel)
 	var style := StyleBoxFlat.new()
 	style.bg_color = Color("1e2737")
@@ -45,9 +41,19 @@ func _build_ui() -> void:
 	style.set_corner_radius_all(10)
 	panel.add_theme_stylebox_override("panel", style)
 
+	var scroll := ScrollContainer.new()
+	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	panel.add_child(scroll)
+
 	var vbox := VBoxContainer.new()
-	vbox.add_theme_constant_override("separation", 10)
-	panel.add_child(vbox)
+	vbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	vbox.add_theme_constant_override("separation", 8)
+	scroll.add_child(vbox)
+	_center_panel(panel, vbox)
+	call_deferred("_center_panel", panel, vbox)
+	resized.connect(func(): _center_panel(panel, vbox))
 
 	var title := Label.new()
 	title.text = "FAKEUNI-VERSE // LOBBY"
@@ -145,6 +151,28 @@ func _build_ui() -> void:
 	_status.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_status.add_theme_color_override("font_color", Color("ff9a8a"))
 	vbox.add_child(_status)
+
+
+func _spacer(h: int) -> Control:
+	var s := Control.new()
+	s.custom_minimum_size = Vector2(0, h)
+	return s
+
+
+func _center_panel(panel: Control, vbox: Control) -> void:
+	var vp := get_viewport_rect().size
+	var w := minf(vbox.get_combined_minimum_size().x + 24.0, vp.x - 16.0)
+	var h := minf(vbox.get_combined_minimum_size().y + 24.0, vp.y - 16.0)
+	panel.anchor_left = 0.5
+	panel.anchor_right = 0.5
+	panel.anchor_top = 0.5
+	panel.anchor_bottom = 0.5
+	panel.offset_left = -w / 2.0
+	panel.offset_right = w / 2.0
+	panel.offset_top = -h / 2.0
+	panel.offset_bottom = h / 2.0
+	panel.grow_horizontal = Control.GROW_DIRECTION_BOTH
+	panel.grow_vertical = Control.GROW_DIRECTION_BOTH
 
 
 func _refresh() -> void:

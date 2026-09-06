@@ -257,10 +257,14 @@ func _unit_sphere() -> SphereMesh:
 func _unhandled_input(event: InputEvent) -> void:
 	if not _is_authority:
 		return
-	if event is InputEventMouseMotion and Input.get_mouse_mode() == Input.MOUSE_MODE_CAPTURED:
-		_yaw_rot -= event.relative.x * SENSITIVITY
-		_pitch = clampf(_pitch - event.relative.y * SENSITIVITY, -_pitch_limit, _pitch_limit)
-	elif event is InputEventMouseButton and Input.get_mouse_mode() == Input.MOUSE_MODE_CAPTURED:
+	if event is InputEventMouseMotion:
+		# look with the mouse when captured, OR when holding LMB (drag to look)
+		var captured := Input.get_mouse_mode() == Input.MOUSE_MODE_CAPTURED
+		var dragging := Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT)
+		if captured or dragging:
+			_yaw_rot -= event.relative.x * SENSITIVITY
+			_pitch = clampf(_pitch - event.relative.y * SENSITIVITY, -_pitch_limit, _pitch_limit)
+	elif event is InputEventMouseButton:
 		if event.button_index == MOUSE_BUTTON_WHEEL_UP and event.pressed:
 			_fov_target = clampf(_fov_target - 5.0, FOV_MIN, FOV_MAX)
 		elif event.button_index == MOUSE_BUTTON_WHEEL_DOWN and event.pressed:
